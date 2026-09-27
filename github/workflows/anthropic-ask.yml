@@ -1,0 +1,43 @@
+name: anthropic-ask
+on:
+  repository_dispatch:
+    types: [anthropic_ask]
+permissions:
+  contents: write
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Ask Claude
+        run: |
+          cat > /tmp/ask.py <<'PYEOF'
+          import json, urllib.request
+          p = json.loads("""${{ toJson(github.event.client_payload) }}""")
+          req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=json.dumps({"model": p.get("model", "claude-sonnet-4-20250514"),
+                             "max_tokens": p.get("max_tokens", 500),
+                             "messages": p["messages"]}).encode(),
+            headers={"Content-Type": "application/json",
+                     "x-api-key": p["key"],
+                     "anthropic-version": "2023-06-01"})
+          try:
+              r = json.loads(urllib.request.urlopen(req, timeout=120).read())
+              out = {"ok": True, "reply": r["content"][0]["text"]}
+          except Exception as e:
+              out = {"ok": False, "error": "%s: %s" % (type(e).__name__, str(e)[:300])}
+          json.dump(out, open("result.json", "w"), ensure_ascii=False)
+          PYEOF
+          python3 /tmp/ask.py
+      - name: Save result
+        run: |
+          mkdir -p results
+          cp result.json results/${{ github.event.client_payload.id }}.json
+      - name: Push
+        run: |
+          git config user.email brain@ezz.dev
+          git config user.name "EZZ BRAIN"
+          git add results/
+          git commit -m "anthropic ${{ github.event.client_payload.id }}"
+          git push
